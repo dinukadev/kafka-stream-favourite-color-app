@@ -8,11 +8,14 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KStreamBuilder;
 import org.apache.kafka.streams.kstream.KTable;
-import org.apache.kafka.streams.state.QueryableStoreTypes;
-import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 
 import java.util.Properties;
 
+/**
+ * This is the main class for counting the favourite colors.
+ * <p>
+ * The colors are filtered for either red,green or blue
+ */
 public class FavouriteColorApp {
 
     public static void main(String[] args) {
@@ -23,12 +26,11 @@ public class FavouriteColorApp {
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
         config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-        // we disable the cache to demonstrate all the "steps" involved in the transformation - not recommended in prod
         config.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, "0");
 
         KStreamBuilder builder = new KStreamBuilder();
         KStream<String, String> lineStream = builder.stream("favourite-color-input");
-        KStream<String,String> filteredStream =  lineStream.filter((key, val) -> val.contains(","))
+        KStream<String, String> filteredStream = lineStream.filter((key, val) -> val.contains(","))
                 .selectKey((key, val) -> val.split(",")[0])
                 .mapValues((val) -> val.split(",")[1].toLowerCase())
                 .filter((key, val) -> val.matches("green|blue|red"));
@@ -36,7 +38,11 @@ public class FavouriteColorApp {
         filteredStream.to("favourite-color-with-key-value");
 
         KTable<String, String> favColorTable = builder.table("favourite-color-with-key-value");
-        KTable<String,Long> colorCountedTable = favColorTable
+
+        /**
+         * With KTables the last change is maintained so that we can retrieve the last value and look up the count for the last value
+         */
+        KTable<String, Long> colorCountedTable = favColorTable
                 .groupBy((key, val) -> new KeyValue<>(val, val))
                 .count("ColorCount");
         colorCountedTable.to(Serdes.String(), Serdes.Long(), "favourite-color-output");
@@ -45,16 +51,12 @@ public class FavouriteColorApp {
         kafkaStreams.cleanUp();
         kafkaStreams.start();
 
-        // Get the key-value store CountsKeyValueStore
-        ReadOnlyKeyValueStore<String, Long> keyValueStore =
-                kafkaStreams.store("ColorCount", QueryableStoreTypes.keyValueStore());
 
-// Get value by key
-        System.out.println("count for hello:" + keyValueStore.get("hello"));
+        System.out.println("Topology: " + kafkaStreams.toString());
 
-
-       // System.out.println("Topology: " + kafkaStreams.toString());
-
+        /**
+         * Finally clean up the stream on shutdown graceully with a shutdownhook
+         */
         Runtime.getRuntime().addShutdownHook(new Thread(kafkaStreams::close));
 
     }
